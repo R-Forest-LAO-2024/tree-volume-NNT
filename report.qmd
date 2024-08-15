@@ -1,0 +1,289 @@
+---
+title: "Calculating forest volume for NNT target area"
+subtitle: ""
+author: ""
+date: "08-2024"
+execute:
+  echo: true
+format:
+  docx:
+    toc: true
+    number-sections: true
+    highlight-style: github
+  pdf:
+    documentclass: scrartcl
+    papersize: A4
+    toc: true
+    number-sections: true
+    number-depth: 2
+    colorlinks: true
+  html: 
+    number-sections: true
+    toc: true
+    toc-depth: 2
+    toc-location: left
+    embed-resources: true
+editor: visual
+---
+
+# Description of the data
+
+## Input data
+
+-   forest_management ສາມປະເພດປ່າ
+
+-   province ແຂວງ
+
+-   district ເມືອງ
+
+-   zone ລ໊ອກ
+
+-   forest_class ສະພາບປ່າ
+
+-   plot ດອນ
+
+-   tree_no ເບີຕົ້ນ
+
+-   wood_type ລະຫັດໄມ້ ຫຼື ຊື່ໄມ້ນອກບັນຊີ
+
+-   tree_species_local_name ຊະນິດພັນໄມ້
+
+-   tree_value ບັນຊີໄມ້
+
+-   tree_dbh ໜ້າຕ້າງ
+
+-   tree_bole_height ລວງສູງໃຕ້ງ່າ
+
+-   tree_quality ຄຸນນະພາບ
+
+-   forest_area ເນື້ອທີ່(ຮຕ)
+
+-   forest_plot_count ຈຳນວນດອນ
+
+-   plot_size ຂະໜາດດອນ
+
+## Calculated columns
+
+-   tree_dbh_class ຂັ້ນໜ້າຕ້າງ(ຊມ)
+
+-   tree_weight ຫົວໜ່ວຍ (not required in R)
+
+-   number ຈໍານວນສຸມ (what is this column?)
+
+-   tree_volume ມ3
+
+-   tree_volume_plot ມ3/ຮຕ
+
+-   tree_weight_plot ຕົ້ນ/ຮຕ
+
+-   tree_volume_forest ມ3/ທມ
+
+-   tree_weight_forest ຕົ້ນ/ທມ
+
+# Objective of the exercise
+
+-   Calculate the total number of trees (DBH \>= 10 cm) and the total volume in the forest area
+
+    -   per zone
+
+    -   per DBH class
+
+    -   Total
+
+![Table 2: total nuber of trees and volume per ha](data-source/table2.png)
+
+![Table 3: Estimation of initial total volume and number of trees](data-source/table3.png)
+
+# Instructions
+
+1.  Load libraries
+2.  Load data
+3.  Check the data
+4.  Calculate tree DBH class, tree volume, and tree weight per ha and for the total forest
+5.  Aggregate values at forest level
+
+# Code
+
+## Load libraries
+
+```{r}
+#| output: false
+
+library(tidyverse)
+library(readxl)
+
+theme_set(theme_bw())
+```
+
+## Load tables
+
+```{r}
+#| output: false
+
+tree_init <- read_xlsx(
+  path = "data-source/raw data NNT 2024_en.xlsx", 
+  sheet = "Data",
+  guess_max = 2500
+  )
+```
+
+## Check the data
+
+```{r}
+names(tree_init)
+
+```
+
+```{r}
+summary(tree_init$tree_dbh)
+summary(tree_init$tree_bole_height)
+```
+
+```{r}
+table(tree_init$forest_management, tree_init$zone)
+```
+
+```{r}
+ggplot(tree_init) +
+  geom_point(aes(x = tree_dbh, y = tree_bole_height, color = as.character(zone))) +
+  labs(
+    x = "DBH (cm)",
+    y = "Bole height (m)",
+    color = "Zone"
+    )
+```
+
+@fig-hd shows the same figure with caption and split by Zone.
+
+```{r}
+#| label: fig-hd
+#| fig-cap: "Tree bole height (m) against DBH (cm)." 
+#| warning: false
+
+ggplot(tree_init) +
+  geom_point(aes(x = tree_dbh, y = tree_bole_height, color = as.character(zone))) +
+  facet_wrap(~zone) +
+  theme(legend.position = "none") +
+  labs(
+    x = "Diameter at breast height (cm)",
+    y = "Bole height (m)",
+    color = "Zone"
+    )
+```
+
+## Calculations
+
+### Clean the data
+
+If trees have no DBH or no height measurement, they have no volume. We need to filter them out.
+
+Instructions:
+
+-   Create `tt` from `tree_init` and use `filter()` to remove trees with no DBH or no height.
+
+```{r}
+tt <- tree_init |> filter(!is.na(tree_dbh), !is.na(tree_bole_height))
+```
+
+### Tree DBH classes
+
+We want character (i.e. text, not number) for the DBH classes so we need to use `mutate()` and `case_when()`. the classes are: 5-9, 10-19, 20-29, ... , 50-59, ≥60.
+
+**EX: Complete the code**
+
+```{r}
+
+tt1 <- tt |>
+  mutate(
+    tree_dbh_class = case_when(
+      tree_dbh < 10 ~ "05-09",
+      tree_dbh < 20 ~ "10-19",
+      tree_dbh < 30 ~ "20-29",
+      tree_dbh < 40 ~ "30-39",
+      tree_dbh < 50 ~ "40-49",
+      tree_dbh < 60 ~ "50-59",
+      tree_dbh >= 60 ~ "60+",
+    )
+  )
+
+table(tt1$tree_dbh_class)
+
+check <- tt1 |> select(tree_dbh_class_XL, tree_dbh_class)
+
+```
+
+### Tree Volume
+
+The volume formula here is
+
+$$
+V = \left( \frac{DBH}{200}\right)^{2} \times pi \times H \times 0.65  
+$$
+
+```{r}
+tt2 <- tt1 |>
+  mutate(
+    tree_volume = round(
+      x = (tree_dbh /200)^2 * pi * tree_bole_height * 0.65,
+      digits = 3
+      )
+    )
+
+check2 <- tt2 |> select(tree_volume_XL, tree_volume)
+```
+
+### Tree volume and weight per plot
+
+Trees with DBH \< 20 cm need a scale factor.
+
+```{r}
+
+table(tree_init$plot_size)
+
+tt3 <- tt2 |> 
+  mutate(
+    plot_area = case_when(
+      plot_size == "10x10" ~ 10 * 10,
+      plot_size == "5x5"   ~ 5 * 5,
+      TRUE ~ NA_real_
+    ),
+    tree_scale_factor = 10000 / plot_area,
+    tree_scale_factor_all = tree_scale_factor / 67
+  )
+
+check3 <- tt3 |> 
+  filter(!is.na(tree_scale_factor)) |>
+  select(tree_weight_plot_XL, tree_scale_factor_all)
+
+```
+
+### Tree volume and weight at the forest level
+
+-   add volume equivalent per ha.
+
+-   multiply scale factor and volume equivalent by forest area.
+
+```{r}
+tt4 <- tt3 |>
+  mutate(
+   tree_volume_plot = tree_volume * tree_scale_factor_all,
+   tree_volume_forest = case_when(
+     forest_class == "MD" & tree_dbh < 20 ~ tree_volume_plot * 51.07,
+     forest_class == "MD" & tree_dbh >= 20 ~ tree_volume,
+     TRUE ~ NA_real_
+   ),
+   tree_weight_forest = case_when(
+     forest_class == "MD" & tree_dbh < 20 ~ tree_scale_factor_all * 51.07,
+     forest_class == "MD" & tree_dbh >= 20 ~ 1,
+     TRUE ~ NA_real_
+   )
+  )
+
+check4a <- tt4 |> select(tree_volume_plot_XL, tree_volume_plot)
+check4b <- tt4 |> select(tree_volume_forest_XL, tree_volume_forest)
+check4c <- tt4 |> select(forest_class, tree_weight_forest_XL, tree_weight_forest)
+```
+
+### Aggregate tree to forest level
+
+Aggregation equal using ?

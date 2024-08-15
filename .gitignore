@@ -1,3 +1,10 @@
+## Custom gitignore
+data-source/
+data/
+results/
+report/
+
+
 # History files
 .Rhistory
 .Rapp.history
@@ -47,3 +54,5 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+/.quarto/
